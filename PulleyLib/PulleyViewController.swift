@@ -722,7 +722,7 @@ open class PulleyViewController: UIViewController {
      */
     public func setDrawerPosition(position: PulleyPosition)
     {
-        setDrawerPosition(position: position, animated: true)
+        setDrawerPosition(position: position, animated: false)
     }
     
     /**
