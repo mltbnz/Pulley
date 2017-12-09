@@ -129,6 +129,15 @@ public enum PulleyDisplayMode {
     case automatic
 }
 
+/// Represents the 'snap' mode for Pulley. The default is 'nearest position'. You can use 'nearestPositionUnlessExceeded' to make the drawer feel lighter or heavier.
+///
+/// - nearestPosition: Snap to the nearest position when scroll stops
+/// - nearestPositionUnlessExceeded: Snap to the nearest position when scroll stops, unless the distance is greater than 'threshold', in which case advance to the next drawer position.
+public enum PulleySnapMode {
+    case nearestPosition
+    case nearestPositionUnlessExceeded(threshold: CGFloat)
+}
+
 private let kPulleyDefaultCollapsedHeight: CGFloat = 68.0
 private let kPulleyDefaultPartialRevealHeight: CGFloat = 264.0
 
@@ -408,7 +417,11 @@ open class PulleyViewController: UIViewController, PulleyDrawerViewControllerDel
     /// The spring's initial velocity for setting the drawer position
     @IBInspectable public var animationSpringInitialVelocity: CGFloat = 0.0
     
+    /// The animation options for setting the drawer position
     public var animationOptions: UIViewAnimationOptions = [.curveEaseInOut]
+    
+    /// The drawer snap mode
+    public var snapMode: PulleySnapMode = .nearestPositionUnlessExceeded(threshold: 20.0)
     
     /// The drawer positions supported by the drawer
     fileprivate var supportedPositions: [PulleyPosition] = PulleyPosition.all {
@@ -427,7 +440,7 @@ open class PulleyViewController: UIViewController, PulleyDrawerViewControllerDel
             
             if supportedPositions.contains(drawerPosition)
             {
-                setDrawerPosition(position: drawerPosition)
+                setDrawerPosition(position: drawerPosition, animated: true)
             }
             else
             {
@@ -997,11 +1010,12 @@ open class PulleyViewController: UIViewController, PulleyDrawerViewControllerDel
     }
     
     /**
-     Set the drawer position, by default the change will be animated. Deprecated. Recommend switching to the other setDrawerPosition method.
+     Set the drawer position, by default the change will be animated. Deprecated. Recommend switching to the other setDrawerPosition method, this one will be removed in a future release.
      
      - parameter position: The position to set the drawer to.
      - parameter isAnimated: Whether or not to animate the change. Default: true
      */
+    @available(*, deprecated)
     public func setDrawerPosition(position: PulleyPosition, isAnimated: Bool = true)
     {
         setDrawerPosition(position: position, animated: false)
@@ -1250,47 +1264,106 @@ extension PulleyViewController: UIScrollViewDelegate {
             }
 
             var drawerStops: [CGFloat] = [CGFloat]()
+            var currentDrawerPositionStop: CGFloat = 0.0
             
             if supportedPositions.contains(.open)
             {
                 drawerStops.append((self.drawerScrollView.bounds.height))
+                
+                if drawerPosition == .open
+                {
+                    currentDrawerPositionStop = drawerStops.last!
+                }
             }
             
             if supportedPositions.contains(.partiallyRevealed)
             {
                 drawerStops.append(partialRevealHeight)
+                
+                if drawerPosition == .partiallyRevealed
+                {
+                    currentDrawerPositionStop = drawerStops.last!
+                }
             }
             
             if supportedPositions.contains(.collapsed)
             {
                 drawerStops.append(collapsedHeight)
+                
+                if drawerPosition == .collapsed
+                {
+                    currentDrawerPositionStop = drawerStops.last!
+                }
             }
             
             let lowestStop = drawerStops.min() ?? 0
             
             let distanceFromBottomOfView = lowestStop + lastDragTargetContentOffset.y
             
-            var currentClosestStop = lowestStop
-            
-            for currentStop in drawerStops
-            {
-                if abs(currentStop - distanceFromBottomOfView) < abs(currentClosestStop - distanceFromBottomOfView)
+            switch snapMode {
+                
+            case .nearestPosition:
+                
+                var currentClosestStop = lowestStop
+                
+                for currentStop in drawerStops
                 {
-                    currentClosestStop = currentStop
+                    if abs(currentStop - distanceFromBottomOfView) < abs(currentClosestStop - distanceFromBottomOfView)
+                    {
+                        currentClosestStop = currentStop
+                    }
                 }
-            }
-            
-            if abs(Float(currentClosestStop - (self.drawerScrollView.bounds.height))) <= Float.ulpOfOne && supportedPositions.contains(.open)
-            {
-                setDrawerPosition(position: .open, animated: true)
-            }
-            else if abs(Float(currentClosestStop - collapsedHeight)) <= Float.ulpOfOne && supportedPositions.contains(.collapsed)
-            {
-                setDrawerPosition(position: .collapsed, animated: true)
-            }
-            else if supportedPositions.contains(.partiallyRevealed)
-            {
-                setDrawerPosition(position: .partiallyRevealed, animated: true)
+                
+                if abs(Float(currentClosestStop - (self.drawerScrollView.bounds.height))) <= Float.ulpOfOne && supportedPositions.contains(.open)
+                {
+                    setDrawerPosition(position: .open, animated: true)
+                }
+                else if abs(Float(currentClosestStop - collapsedHeight)) <= Float.ulpOfOne && supportedPositions.contains(.collapsed)
+                {
+                    setDrawerPosition(position: .collapsed, animated: true)
+                }
+                else if supportedPositions.contains(.partiallyRevealed)
+                {
+                    setDrawerPosition(position: .partiallyRevealed, animated: true)
+                }
+                
+            case .nearestPositionUnlessExceeded(let threshold):
+                
+                let distance = currentDrawerPositionStop - distanceFromBottomOfView
+                
+                var positionToSnapTo: PulleyPosition = drawerPosition
+
+                if abs(distance) > threshold
+                {
+                    if distance < 0
+                    {
+                        let orderedSupportedDrawerPositions = supportedPositions.sorted(by: { $0.rawValue < $1.rawValue })
+
+                        for position in orderedSupportedDrawerPositions
+                        {
+                            if position.rawValue > drawerPosition.rawValue
+                            {
+                                positionToSnapTo = position
+                                break
+                            }
+                        }
+                    }
+                    else
+                    {
+                        let orderedSupportedDrawerPositions = supportedPositions.sorted(by: { $0.rawValue > $1.rawValue })
+                        
+                        for position in orderedSupportedDrawerPositions
+                        {
+                            if position.rawValue < drawerPosition.rawValue
+                            {
+                                positionToSnapTo = position
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                setDrawerPosition(position: positionToSnapTo, animated: true)
             }
         }
     }
